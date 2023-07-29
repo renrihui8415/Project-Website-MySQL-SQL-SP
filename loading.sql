@@ -61,8 +61,8 @@
 */
 
 DELIMITER &&  
-DROP PROCEDURE IF EXISTS exampleschema.sp_loading_create_temp_table;
-CREATE PROCEDURE exampleschema.sp_loading_create_temp_table (
+DROP PROCEDURE IF EXISTS your_schema.sp_loading_create_temp_table;
+CREATE PROCEDURE your_schema.sp_loading_create_temp_table (
 	IN schema_name varchar (50),
     IN temp_tablename varchar(50),
 	IN table_name varchar(50),
@@ -77,7 +77,7 @@ BEGIN
 			SET @full_error = CONCAT("ERROR ", @errno, " (", @sqlstate, "): ", @text);
 			SELECT @full_error;
             set result_for_sp_loading_create_temp_table=0;
-            call exampleschema.sp_init_logtable_for_loading (schema_name, '1. temp table creation', temp_tablename,0, 0,@full_error);
+            call your_schema.sp_init_logtable_for_loading (schema_name, '1. temp table creation', temp_tablename,0, 0,@full_error);
 				
         END;
 
@@ -102,22 +102,30 @@ BEGIN
 		set result_for_sp_loading_create_temp_table=1;
 		-- after creating the temp table
 		-- write log in the log table
-		call exampleschema.sp_init_logtable_for_loading (schema_name, '1. temp table creation', temp_tablename,1, 0, concat("created from `",schema_name,"`.`",table_name,"`"));
+		call your_schema.sp_init_logtable_for_loading (schema_name, '1. temp table creation', temp_tablename,1, 0, concat("created from `",schema_name,"`.`",table_name,"`"));
 		
     COMMIT;	
     select @result_for_sp_loading_create_temp_table;
 END &&  
 DELIMITER ;  
 /*
+-- call your_schema.sp_loading_create_temp_table ('your_schema', 'priceindex_all_temp', '0.PriceIndex',@temp_table_created);
+-- select @temp_table_created;
+-- DROP TABLE IF EXISTS `your_schema`.`priceindex_all_temp`;
+-- select * from priceindex_all_temp;
+-- CREATE TABLE  `your_schema`.`priceindex_all` LIKE  `your_schema`.`0.priceindex`;
+-- select status from log_for_loading where locate('temp table creation',EventSource)>0 and timediff(now(),Time_stamp)<10
 -- ----------------------------------------------------------------
 -- 2. after lambda checks log table for a eventsource of 'temp table creation' and find its status is 1
 -- (or, to get the returned value @temp_table_created from sp)
 -- it will load the data first and then call the following SP
+-- call your_schema.sp_loading_PriceIndex("your_schema","temp","0.PriceIndex", "priceindex.csv", 18516,5, @data_loading_splitting);
+-- select @data_loading_splitting;
 */
 
 DELIMITER && 
-DROP PROCEDURE IF EXISTS exampleschema.sp_loading_PriceIndex; 
-CREATE PROCEDURE exampleschema.sp_loading_PriceIndex (
+DROP PROCEDURE IF EXISTS your_schema.sp_loading_PriceIndex; 
+CREATE PROCEDURE your_schema.sp_loading_PriceIndex (
 	IN schema_name varchar (50),
     IN temp_tablename varchar(50),
 	IN table_name varchar(50),
@@ -134,19 +142,19 @@ BEGIN
 			SET @full_error = CONCAT("ERROR ", @errno, " (", @sqlstate, "): ", @text);
 			SELECT @full_error;
             set result_for_sp_loading_PriceIndex=0;
-            call exampleschema.sp_init_logtable_for_loading (schema_name, '2. data loading and splitting', temp_tablename,0, 0,@full_error);				
+            call your_schema.sp_init_logtable_for_loading (schema_name, '2. data loading and splitting', temp_tablename,0, 0,@full_error);				
         END;
 	-- 2. the body SP
     START TRANSACTION;  
 		-- 1. MySQL is to count how many rows were loaded into temp table by lambda
-		call exampleschema.sp_loading_count_table(schema_name, temp_tablename, @result_rows,"");
+		call your_schema.sp_loading_count_table(schema_name, temp_tablename, @result_rows,"");
 
 		-- 2. to compare the numbers 
 		IF @result_rows >= (total_rows -maxerrors_allowed) THEN
 			-- to load
-			call exampleschema.sp_loading_upsert_general_table (schema_name, temp_tablename, table_name);
+			call your_schema.sp_loading_upsert_general_table (schema_name, temp_tablename, table_name);
 			-- to write log for successful loading
-			call exampleschema.sp_init_logtable_for_loading (schema_name, concat("2.1 permanent table loading from temp table : ",temp_tablename), table_name,1, @result_rows,concat("loading from temptable to general table successfully. ","Rows skipped: ",(total_rows - @result_rows)));
+			call your_schema.sp_init_logtable_for_loading (schema_name, concat("2.1 permanent table loading from temp table : ",temp_tablename), table_name,1, @result_rows,concat("loading from temptable to general table successfully. ","Rows skipped: ",(total_rows - @result_rows)));
 			
 			-- after loading to general table successfully,
 			-- start loading for sub tables
@@ -155,19 +163,19 @@ BEGIN
 			-- in my website, I need subcategory tables 
 			IF locate ('priceindex',table_name)>0 THEN
 				-- update general table with status and load data to sub tables
-				call exampleschema.sp_loading_priceindex_split (schema_name, table_name);
+				call your_schema.sp_loading_priceindex_split (schema_name, table_name);
 				-- check if the loading is complete
-				call exampleschema.sp_loading_check_remaining_after_split (schema_name, table_name, @check_remain);
+				call your_schema.sp_loading_check_remaining_after_split (schema_name, table_name, @check_remain);
 				
 				IF @check_remain =0 THEN
 					-- complete loading
 					-- write log
 					set result_for_sp_loading_PriceIndex =1;
-					call exampleschema.sp_init_logtable_for_loading (schema_name, "2.2 general table splitting", table_name,1, @result_rows,"loading to subcategory tables successfully"); 
+					call your_schema.sp_init_logtable_for_loading (schema_name, "2.2 general table splitting", table_name,1, @result_rows,"loading to subcategory tables successfully"); 
 					
 				ELSE 
 					set result_for_sp_loading_PriceIndex =0;
-					call exampleschema.sp_init_logtable_for_loading (schema_name, "2.2 general table splitting", table_name,0, 0,"loading to subcategory tables failed");
+					call your_schema.sp_init_logtable_for_loading (schema_name, "2.2 general table splitting", table_name,0, 0,"loading to subcategory tables failed");
 				END IF;
 			-- ELSE
 				-- loading process for other data files other than priceindex
@@ -176,7 +184,7 @@ BEGIN
 			-- don't load data from temp_table to permanent table
 			-- just to write log for unsuccessful loading
             set result_for_sp_loading_PriceIndex =0;
-			call exampleschema.sp_init_logtable_for_loading (schema_name, file_name, "2.1 permanent table loading failed",0, 0,'temp table contains incomplete data from original data file');
+			call your_schema.sp_init_logtable_for_loading (schema_name, file_name, "2.1 permanent table loading failed",0, 0,'temp table contains incomplete data from original data file');
 			
 		END IF;
     commit;
@@ -198,8 +206,8 @@ DELIMITER ;
 */
 
 DELIMITER &&  
-DROP PROCEDURE IF EXISTS exampleschema.sp_loading_count_table;
-CREATE PROCEDURE exampleschema.sp_loading_count_table (
+DROP PROCEDURE IF EXISTS your_schema.sp_loading_count_table;
+CREATE PROCEDURE your_schema.sp_loading_count_table (
 	IN schema_name varchar(50),
 	IN table_name varchar(50),
     OUT total_for_sp_loading_count_table bigint,
@@ -235,6 +243,8 @@ END &&
 DELIMITER ;   
 /*
 -- to get the out paramter: 
+-- call sp_loading_count_table ("your_schema", "temp",@result_row);
+-- select @result_row;
 -- -------------------------------------------------------------------------
 -- 4. below is child sp for upsert from template to permanent table (general table in this project)
 -- If there is PK or unique index in the table, any duplicate loading would cause error of 'key violation'
@@ -244,8 +254,8 @@ DELIMITER ;
 -- because one report from dashboard is based on this table, we have to make data in this table complete,accurate, up to date, and no duplicates
 */
 DELIMITER &&  
-DROP PROCEDURE IF EXISTS exampleschema.sp_loading_upsert_general_table;
-CREATE PROCEDURE exampleschema.sp_loading_upsert_general_table (
+DROP PROCEDURE IF EXISTS your_schema.sp_loading_upsert_general_table;
+CREATE PROCEDURE your_schema.sp_loading_upsert_general_table (
 	IN schema_name varchar(50),
 	IN temp_tablename varchar(50),
 	IN table_name varchar(50)
@@ -275,18 +285,21 @@ END &&
 DELIMITER ; 
 /*
 -- -------------------------------------------------------------------------
+-- call your_schema.sp_loading_upsert_general_table ("your_schema", "temp", "0.priceindex")
+-- call your_schema.sp_loading_upsert_general_table ("your_schema",  "0.PriceIndex","temp") ; for testing purpose
+-- call your_schema.sp_loading_priceindex_split ("your_schema", "0.priceindex");
 -- 5. to create SP for loading --> Food, Energy, Cosmetics, Tobacco
 */
 DELIMITER &&  
-DROP PROCEDURE IF EXISTS exampleschema.sp_loading_priceindex_split;
-CREATE PROCEDURE exampleschema.sp_loading_priceindex_split (
+DROP PROCEDURE IF EXISTS your_schema.sp_loading_priceindex_split;
+CREATE PROCEDURE your_schema.sp_loading_priceindex_split (
 	IN schema_name varchar(50),
 	IN table_name varchar(50)
     )    
 BEGIN    
 	-- the original data files contains various products 
     -- the data will be split into sub tables according to their categories
-    -- @tablename=exampleschema.`0.PriceIndex`;
+    -- @tablename=your_schema.`0.PriceIndex`;
     
     -- use comma number to get how many kinds of product there are.
 	set @food_list ="'steak', 'roast', 'beef', 'chicken', 'pork', 'bacon', 'wiener', 'salmon','milk','butter','cheese','egg','bread', 'cracker','macaroni','flour','corn','apple','banana','grape','orange','juice','cabbage','carrot','celery','mushroom','onion','potato','fried','bake','bean','canned','ketchup','sugar','coffee','tea','cooking','salad','oil','soup','food','peanut','fruit','drink','cola','lemon'";
@@ -471,11 +484,14 @@ DELIMITER ;
 -- in the column of status
 -- create a table to carry data of this kind and send a message back to lambda (or ec2 or ecs) 
 -- a message or email will be sent by lambda using SNS (or SES) to the person in charge
+
+-- call your_schema.sp_loading_check_remaining_after_split ("your_schema","0.PriceIndex",@remain);
+-- select @remain
 */    
 
 DELIMITER &&  
-DROP PROCEDURE IF EXISTS exampleschema.sp_loading_check_remaining_after_split;
-CREATE PROCEDURE exampleschema.sp_loading_check_remaining_after_split (
+DROP PROCEDURE IF EXISTS your_schema.sp_loading_check_remaining_after_split;
+CREATE PROCEDURE your_schema.sp_loading_check_remaining_after_split (
 	IN schema_name varchar(50),
 	IN table_name varchar(50),
     OUT result_for_sp_loading_check_remaining_after_split boolean
@@ -512,7 +528,7 @@ BEGIN
 		DEALLOCATE PREPARE dynamic_statement;
 	END IF;
     
-    call exampleschema.sp_loading_count_table (schema_name, table_name, @remain_rows," where status is null ");
+    call your_schema.sp_loading_count_table (schema_name, table_name, @remain_rows," where status is null ");
     IF @remain_rows >0 THEN 
 		-- Someone needs to work today...
         -- the product can be a new one to the database, just add the product name in the list
@@ -563,5 +579,6 @@ DELIMITER ;
 -- loading files from local to localhost is just for testing. so i don't mind the repetition.
 
 -- finally , to call the parent sp
+-- call your_schema.sp_loading_PriceIndex("your_schema","temp","0.PriceIndex", "priceindex.csv", 2316,5, @result)
 */
 

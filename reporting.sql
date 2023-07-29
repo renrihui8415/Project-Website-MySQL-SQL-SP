@@ -2,6 +2,10 @@
 #### MySQL Reporting ####
 #### This file builds procedures which can be used to obtain all the report data that needed for my website.####
 #### The report data will be sent to AMAZON Simple Storage Service (S3) to serve as the static content of the website.####
+-- --------------------------------------------------------
+-- ALTER TABLE might be slow for AWS RDS for MySQL
+-- *test and determine if to use alter command 
+-- *test and determine if to create a large table and renamed columns
 
 -- --------------------------------------------------------
 -- This time, i create parent SP ahead of child SPs for report building.
@@ -45,10 +49,9 @@
 -- they are specially for detailed reports, and they can make nested queries less complicated.
 -- so , different reports base on different tables
 */
-
+DROP PROCEDURE IF EXISTS your_schema.sp_reporting_50_general_table_for_report_building;
 DELIMITER &&  
-DROP PROCEDURE IF EXISTS exampleschema.sp_reporting_50_general_table_for_report_building;
-CREATE PROCEDURE exampleschema.sp_reporting_50_general_table_for_report_building (
+CREATE PROCEDURE your_schema.sp_reporting_50_general_table_for_report_building (
 	IN schema_name varchar(50),
 	IN table_name varchar(50),
     IN reporting_table_name varchar(50),
@@ -63,7 +66,7 @@ BEGIN
 			SET @full_error = CONCAT("ERROR ", @errno, " (", @sqlstate, "): ", @text);
 			SELECT @full_error;
             set result_for_sp_reporting_50_general_table_for_report_building=0;
-            call exampleschema.sp_init_logtable_for_reporting (schema_name, 'sp_reporting_50_general_table_for_report_building', @full_error);				
+            call your_schema.sp_init_logtable_for_reporting (schema_name, 'sp_reporting_50_general_table_for_report_building', @full_error);				
         END;
 	-- 2. the body SP
     START TRANSACTION;
@@ -73,115 +76,68 @@ BEGIN
 		-- a). copy data from another table
 		-- modify and generate new table for reporting
 		*/
+		set @sql = concat ('
+			Drop table if exists `',@schema_name,'`.`',reporting_table_name,'`;'
+		);
+		PREPARE dynamic_statement FROM @sql;
+		EXECUTE dynamic_statement;
+		DEALLOCATE PREPARE dynamic_statement;
+        
 		set @sql= concat_ws('',
 		'create table IF NOT EXISTS `',@schema_name,'`.`',reporting_table_name,'` 
-		select *, ',
-			' LEFT(date,4) as Year, 
-			RIGHT(date,2) as Month, '
+		select  ',
+			' Date, GEO, DGUID,
+            Products as `Products Details`,
+            UOM, UOM_ID, SCALAR_FACTOR, SCALAR_ID, VECTOR, COORDINATE,
+            VALUE as Price,
+            STATUS, SYMBOL, `TERMINATED`, `DECIMALS`,
+            LEFT(Date, 4) as Year,
+            RIGHT(Date, 2) as Month, ',
 			'CASE WHEN locate(",",Products)>0
 				THEN SUBSTRING_INDEX(Products,",",(LENGTH(Products)-LENGTH(REPLACE(Products,",",""))))
 			WHEN locate("(", Products)>0 
 				THEN SUBSTRING(Products, 1, locate("(",Products)-1)  
-			END Product, ',
+			END Products, ',
 			'CASE WHEN locate(",",Products)>0
 				THEN substring_index(Products,",",-1) 
 			WHEN locate("(", Products)>0 
 				THEN  SUBSTRING(Products, locate("(",Products),(locate(")",Products)-locate("(",Products)))  
 			END Measurement ',
 		 ' from ', '`',@schema_name, '`.`',@table_name,'`');
+         
+		-- select @sql;
 		/* to pack a sql query in Concat function
 		, the easier way is to write the hard code query that runs successfully
 		, then translate the hard code query into dynamic one
-		create table IF NOT EXISTS `exampleschema`.`1.report` 
-		select *, CASE WHEN locate(",",Products)>0
-				THEN SUBSTRING_INDEX(Products,",",(LENGTH(Products)-LENGTH(REPLACE(Products,",",""))))
-			WHEN locate("(", Products)>0 
-				THEN SUBSTRING(Products, 1, locate("(",Products)-1)  
-			END Product, 
-			CASE WHEN locate(",",Products)>0
-				THEN substring_index(Products,",",-1) 
-			WHEN locate("(", Products)>0 
-				THEN  SUBSTRING(Products, locate("(",Products),(locate(")",Products)-locate("(",Products)) ) 
-			END Measurement  from `exampleschema`.`0.priceindex`
 		*/
 
 		PREPARE dynamic_statement FROM @sql;
 		EXECUTE dynamic_statement;
 		DEALLOCATE PREPARE dynamic_statement;
 		
-		-- b). to point to the right table 
-		set @table_name=reporting_table_name;
-		-- select @table_name;
-		/*
-		-- c). to tailor the table to reports
-		-- before modify the table, check if column already exists 
-		-- just need to check "products details" 
-		-- if this column exists, it means the table already created and modified previously
-		*/
-		set @column_name='Products Details';
-		set @schema_name=schema_name; 
-		set @sql = concat_ws('','
-		SELECT count(*) into  @column_exists
-		FROM INFORMATION_SCHEMA.COLUMNS
-		WHERE table_name = "',@table_name,
-		'" AND table_schema = "', @schema_name,
-		'" AND column_name = "', @column_name, '";');
-		/*
-		-- here,within the sql string, we only need to quote the table name, etc
-		-- no need to use ``, as mysql will consider `` as part of the table name
-		*/
-		PREPARE dynamic_statement FROM @sql;
-		EXECUTE dynamic_statement;
-		DEALLOCATE PREPARE dynamic_statement;
-		/*
-		SELECT count(*) into @column_exists
-		FROM INFORMATION_SCHEMA.COLUMNS
-		WHERE table_name = '1.report'
-		AND table_schema ='exampleschema'
-		AND column_name = 'Products Details';
-		select @column_exists;
-		*/
-		IF @column_exists <1 THEN
-			/*
-			-- below syntax to rename column is available for MySQL 8.0 and later
-            -- if below 8.0, use 'alter table `1.report` change  Value Price varchar(255);'
-			*/
-			set @sql = concat('
-				ALTER TABLE `',@schema_name, '`.`', @table_name ,
-				'` RENAME COLUMN Products TO `Products Details`',';');
-				PREPARE dynamic_statement FROM @sql;
-				EXECUTE dynamic_statement;
-				DEALLOCATE PREPARE dynamic_statement;
-			set @sql = concat('
-				ALTER TABLE `',@schema_name, '`.`', @table_name ,
-				'` RENAME COLUMN Product TO `Products`',';');
-				PREPARE dynamic_statement FROM @sql;
-				EXECUTE dynamic_statement;
-				DEALLOCATE PREPARE dynamic_statement;
-			set @sql = concat('
-				ALTER TABLE `',@schema_name, '`.`', @table_name ,
-				'` RENAME COLUMN Value TO `Price`',';');
-				PREPARE dynamic_statement FROM @sql;
-				EXECUTE dynamic_statement;
-				DEALLOCATE PREPARE dynamic_statement;
-		END IF;
+		
 	commit;
     set result_for_sp_reporting_50_general_table_for_report_building=1;
+    call your_schema.sp_init_logtable_for_reporting (schema_name, 'sp_reporting_50_general_table_for_report_building', 'general table created successfully');
     -- select @result_for_sp_reporting_50_general_table_for_report_building;
 END &&  
 DELIMITER ;
-/*
 
+/*
+-- call your_schema.sp_reporting_50_general_table_for_report_building('your_schema','0.PriceIndex','1.report',@table_for_reporting);
+-- select @table_for_reporting;
+-- select @sql;
+-- select * from log_for_reporting;
+-- select * from `1.report`;
 -- lambda will get the feed back if the table for reporting created and modified or not
 -- ----------------------------------------------------------------------------------
 -- 1.2 to create SP for the general report 
 -- within this stored procedure, child procedures will be called. 
 -- 6 parameters can be passed in at the same time
 */
-
+DROP PROCEDURE IF EXISTS your_schema.sp_reporting_1_price_by_year_month_geo_category; 
 DELIMITER && 
-DROP PROCEDURE IF EXISTS exampleschema.sp_reporting_1_price_by_year_month_geo_category; 
-CREATE PROCEDURE exampleschema.sp_reporting_1_price_by_year_month_geo_category (
+CREATE PROCEDURE your_schema.sp_reporting_1_price_by_year_month_geo_category (
 	IN schema_name varchar(50),
 	IN table_name varchar(50),
     IN delimiter_reporting_1 varchar(10),
@@ -189,7 +145,8 @@ CREATE PROCEDURE exampleschema.sp_reporting_1_price_by_year_month_geo_category (
     IN month_no varchar(50),
     IN geo_limit varchar(50),
     IN category varchar(50),
-    OUT result_for_sp_reporting_1_price_by_year_month_geo_category varchar(255)
+	IN reporting_data_table varchar(50),
+    OUT result_for_sp_reporting_1_price_by_year_month_geo_category varchar(800)
     )    
 BEGIN 
 	-- 1. Declare variables to hold diagnostics area information
@@ -200,7 +157,7 @@ BEGIN
 			SET @full_error = CONCAT("ERROR ", @errno, " (", @sqlstate, "): ", @text);
 			-- SELECT @full_error;
             set result_for_sp_reporting_1_price_by_year_month_geo_category=0;
-            call exampleschema.sp_init_logtable_for_reporting (schema_name, 'sp_reporting_1_price_by_year_month_geo_category', @full_error);				
+            call your_schema.sp_init_logtable_for_reporting (schema_name, 'sp_reporting_1_price_by_year_month_geo_category', @full_error);				
         END;
 	-- 2. the body SP
     START TRANSACTION;
@@ -211,8 +168,8 @@ BEGIN
     -- it all depends on how we construct the nested query
     -- 1 for parameter of year_no
 	*/
-	call exampleschema.sp_reporting_99_aggregation(schema_name,table_name,"max","year","",@latest_year);
-    call exampleschema.sp_reporting_99_aggregation(schema_name,table_name,"min","year","",@earliest_year);
+	call your_schema.sp_reporting_99_aggregation(schema_name,table_name,"max","year","",@latest_year);
+    call your_schema.sp_reporting_99_aggregation(schema_name,table_name,"min","year","",@earliest_year);
 	/*
     -- Note:@latest_year in data file might not be the current year
 	-- find the max and min year number using one of the child procedure
@@ -267,7 +224,7 @@ BEGIN
 			*/
 			IF @single_year_string REGEXP '^-?[0-9]+$' THEN
 				set @single_year_string=cast(@single_year_string as signed);
-                select @single_year_string;
+                -- select @single_year_string;
 				IF @single_year_string > @latest_year THEN
 					SET @single_year_string = @latest_year;
 				ELSEIF @single_year_string<@earliest_year THEN
@@ -354,8 +311,8 @@ BEGIN
 			*/
             set @schema_name =schema_name;      
             set @single_month_string=trim(@single_month_string);
-            call exampleschema.sp_init_calendar_month_checking(schema_name,@single_month_string, @check_result);	
-            select @check_result;
+            call your_schema.sp_init_calendar_month_checking(schema_name,@single_month_string, @check_result);	
+            -- select @check_result;
 			IF @check_result =0 THEN 
 				-- the month input is not valid 
                 -- sp will return all data 
@@ -363,6 +320,8 @@ BEGIN
                 LEAVE month_loop;
 			ELSE
 				-- continue to varify and collect valid month values
+                set @check_result=LPAD(@check_result, 2, '0');
+                -- to add leading zero if single digit
                 set @month_number=concat(@month_number,@check_result,delimiter_reporting_1);
 				/*
                 -- attention: there is a trailing and begining comma in the string
@@ -389,7 +348,7 @@ BEGIN
 	*/
     set @geo_string =geo_limit;
 	-- check the values by searching in the data table
-	call exampleschema.sp_reporting_99_value_exists(schema_name,table_name,"GEO",@geo_string,delimiter_reporting_1,0,@geo_exists,@where_clause_for_geo);
+	call your_schema.sp_reporting_99_value_exists(schema_name,table_name,"GEO",@geo_string,delimiter_reporting_1,0,@geo_exists,@where_clause_for_geo);
 	-- select @geo_exists;    
 	set @where_geo= IF(@geo_exists=0,' ',@where_clause_for_geo);
 	/*
@@ -431,7 +390,9 @@ BEGIN
     set @count_outer_loop =1;
     set @start_position_outer_loop=1;
     set @sub_category_list = ''; -- use it to search in column products
+    set @sub_category_in_locate_function=''; 
     /*
+    -- to get locate('milk', Products)>0 or locate('steak',Products)>0
     select @sub_category_string ;
     select @sub_category_list ;
     select @single_sub_category_string ;
@@ -457,8 +418,10 @@ BEGIN
 				set @main_category_list = concat(@main_category_list,@single_sub_category_string,delimiter_reporting_1);
 			ELSE -- set the value to sub category list, later to search in column products
 				set @sub_category_list= concat(@sub_category_list,@single_sub_category_string,delimiter_reporting_1);
-			END IF;
+				set @sub_category_in_locate_function=concat(@sub_category_in_locate_function,'or LOCATE("',@single_sub_category_string,'", Products)>0 ');
+            END IF;
 			/*
+            -- select @sub_category_in_locate_function;
             -- --------------------------------------------------------------------------------------------------
 			*/
 			set @count_outer_loop=@count_outer_loop+1;
@@ -486,10 +449,21 @@ BEGIN
     -- in below IF function, we need to use if a list ='', we can't use a list is null, as in mysql, ='' is different from is null
     */
 	set @where_status= IF(@main_category_list='', ' ', concat(' status in ("', replace(@main_category_list,delimiter_reporting_1,@delimiter_with_quotes_reporting_1),'")'));
-    set @where_products= IF(@sub_category_list='', ' ', concat(' status in ("', replace(@sub_category_list,delimiter_reporting_1,@delimiter_with_quotes_reporting_1),'")'));
+    IF @sub_category_list='all' THEN
+		set @sub_category_list='';
+	END IF;
+    -- if user inputs 'all', it will fall in @sub_category_list
+    -- 'all' is invalid for @sub_category_list
+    
+    set @where_products= IF(@sub_category_list='', ' ', concat('(', substr(@sub_category_in_locate_function,4),')'));
+    
+    /*
+    -- LOCATE(substring, string, start);
+    -- need to use locate to loop every item in @sub_category_list;
+    
     -- select @where_products;
- 
-	/*
+	-- select @sub_category_list;
+	
     -- up until now, we have created the parts of where-clause
     -- now is to build the complete and complex nested query
 	-- the where-clause is most tricky part
@@ -560,7 +534,15 @@ BEGIN
     END IF;
     
     -- FINALLY, to create the sql query~
-	set @sql =concat ('
+	set @sql = concat_ws('',
+		'Drop table if exists `',@schema_name,'`.`',reporting_data_table,'`;'
+	);
+	PREPARE dynamic_statement FROM @sql;
+	EXECUTE dynamic_statement;
+	DEALLOCATE PREPARE dynamic_statement;
+
+	set @sql =concat_ws('',
+		'Create table `',schema_name,'`.`',reporting_data_table,'`  
 		Select GEO, Year, Month, Products, Measurement, Price, Status
 		from `',schema_name, '`.`', table_name, '` ',
 		@where_statement,';'
@@ -570,6 +552,7 @@ BEGIN
 	EXECUTE dynamic_statement;
 	DEALLOCATE PREPARE dynamic_statement;
 	set result_for_sp_reporting_1_price_by_year_month_geo_category=@sql;
+	call your_schema.sp_init_logtable_for_reporting (schema_name, 'sp_reporting_1_price_by_year_month_geo_category', 'report data generated and saved successfully');				
     commit;
     -- select @result_for_sp_reporting_1_price_by_year_month_geo_category;
 END &&  
@@ -577,6 +560,12 @@ DELIMITER ;
 /*
 -- ----------------------------------------------------------------------------------
 -- lets test the SP:
+-- call your_schema.sp_reporting_1_price_by_year_month_geo_category ('your_schema', '1.report',',',' 1995 ,543,5009','12,7','canada','food','priceindex_sourcedata_16894754139474',@final_sql_string);
+call your_schema.sp_reporting_1_price_by_year_month_geo_category ('your_schema', '1.report',',','all','all','all','all','priceindex_sourcedata',@final_sql_string);
+select * from priceindex_sourcedata;
+select @final_sql_string;
+select * from log_for_reporting;
+
 -- I added space around year number 1995
 -- there was a number of 543 for year parameter
 -- the month parameter are multiple values
@@ -586,33 +575,36 @@ DELIMITER ;
 
 
 		Select GEO, Year, Month, Products, Measurement, Price, Status
-		from `exampleschema`.`1.report`  WHERE  year in ("1995","1995","2022") and  month in ("12","7") and  lower(GEO) in ("canada") and  status in ("1");
+		from `your_schema`.`1.report`  WHERE  year in ("1995","1995","2022") and  month in ("12","7") and  lower(GEO) in ("canada") and  status in ("1");
 
 
 -- lets test if no parameter except for schema/table name is given;
--- call exampleschema.sp_reporting_1_price_by_year_month_geo_category ('exampleschema', '1.report',',','','','','',@test_result);
+-- call your_schema.sp_reporting_1_price_by_year_month_geo_category ('your_schema', '1.report',',','','','','',@test_result);
 -- again , the sp gives the correct result
 
 		Select GEO, Year, Month, Products, Measurement, Price, Status
-		from `exampleschema`.`1.report`  ;
+		from `your_schema`.`1.report`  ;
 
 -- select @test_result;
 #### this is not finished #####
 -- after we build the report and get the result, we could 
 -- export the report to s3 where the static content of my website resides
--- using lambda or ECS container
-
+-- this will be achieved by Containerized Lambda shared in another repo
 
 
 -- ----------------------------------------------------------------------------------
 -- 2. to create child SP
 -- 2.1 as the reports will use aggregation a lot
 -- create a specific SP for this purpose
+
+-- call your_schema.sp_reporting_99_aggregation("your_schema","1.report","max","year"," ",@latest_year);
+-- call your_schema.sp_reporting_99_aggregation("your_schema","1.report","min","year","",@earliest_year);
+-- select @latest_year;
 */
 
 DELIMITER &&  
-DROP PROCEDURE IF EXISTS exampleschema.sp_reporting_99_aggregation;
-CREATE PROCEDURE exampleschema.sp_reporting_99_aggregation (
+DROP PROCEDURE IF EXISTS your_schema.sp_reporting_99_aggregation;
+CREATE PROCEDURE your_schema.sp_reporting_99_aggregation (
 	IN schema_name varchar(50),
 	IN table_name varchar(50),
     IN aggregation varchar(50),
@@ -651,11 +643,14 @@ DELIMITER ;
 -- also, the SP is working as the delimiter in a string, we set it ',' by default
 -- there might be other possibilities, if you d like to make the sp more versatile
 -- can try make every sp be acceptable for delimiter parameter
+
+-- call your_schema.sp_reporting_99_value_exists("your_schema","1.report","geo","CANADA",",",0,@value_exists,@where_clause_for_geo);
+-- select @value_exists; select @where_clause_for_geo;
 */
 
 DELIMITER &&  
-DROP PROCEDURE IF EXISTS exampleschema.sp_reporting_99_value_exists;
-CREATE PROCEDURE exampleschema.sp_reporting_99_value_exists (
+DROP PROCEDURE IF EXISTS your_schema.sp_reporting_99_value_exists;
+CREATE PROCEDURE your_schema.sp_reporting_99_value_exists (
 	IN schema_name varchar(50),
 	IN table_name varchar(50),
     IN column_name varchar(50),
@@ -700,9 +695,9 @@ BEGIN
 			set @start_position=@start_position_new;
 			-- after we get one single value string
             set @single_value_string=trim(@single_value_string);
-            select @single_value_string;
+            -- select @single_value_string;
 			set @value_list=concat(@value_list,@single_value_string,delimiter_value);
-            select @value_list;
+            -- select @value_list;
 			/*
 			-- attention: there is a trailing delimiter_value (comma) in the string
 			*/
@@ -744,8 +739,62 @@ BEGIN
 END &&  
 DELIMITER ; 
 
+/* line chart -- price indexes for 4 categories in recent years
+*/
+DROP PROCEDURE IF EXISTS your_schema.sp_reporting_2_priceindex_by_category_year;
+DELIMITER &&  
+CREATE PROCEDURE your_schema.sp_reporting_2_priceindex_by_category_year (
+	IN schema_name varchar(50),
+	IN table_name varchar(50),
+    IN reporting_data_table varchar(50),
+    OUT result_for_sp_reporting_2_priceindex_by_category_year tinyint
+    )    
+BEGIN 
+	-- 1. Declare variables to hold diagnostics area information
+	DECLARE exit handler for SQLEXCEPTION
+		BEGIN
+			GET DIAGNOSTICS CONDITION 1 @sqlstate = RETURNED_SQLSTATE, 
+			@errno = MYSQL_ERRNO, @text = MESSAGE_TEXT;
+			SET @full_error = CONCAT("ERROR ", @errno, " (", @sqlstate, "): ", @text);
+			-- SELECT @full_error;
+            set result_for_sp_reporting_2_priceindex_by_category_year=0;
+            call your_schema.sp_init_logtable_for_reporting (schema_name, 'sp_reporting_2_priceindex_by_category_year', @full_error);				
+        END;
+	-- 2. the body SP
+    START TRANSACTION;	
+    
+	   set @sql =concat_ws('',
+			'Create table `',schema_name,'`.`',reporting_data_table,'`  
+			Select Status,Year,AVG(Price) as AVG
+			from `',schema_name, '`.`', table_name, '` ',
+			'Group by Status, Year Order by Status, Year;'
+			);   
 
+		PREPARE dynamic_statement FROM @sql;
+		EXECUTE dynamic_statement;
+		DEALLOCATE PREPARE dynamic_statement;
+        
+		set result_for_sp_reporting_2_priceindex_by_category_year=1;
+		call your_schema.sp_init_logtable_for_reporting (schema_name, 'sp_reporting_2_priceindex_by_category_year', 'report data generated and saved successfully');				
+	commit;
+    
+END &&  
+DELIMITER ; 
 
+-- below is to get report data for respective charts
+/*
+call your_schema.sp_reporting_2_priceindex_by_category_year('your_schema','1.report','priceindex_line',@result_for_report_2);
+select * from priceindex_line;
+drop table priceindex_line;
+select * from `1.report`;
+*/
 
-
-
+/* bar chart -- price indexes for milk and steak for provinces in the most recent year
+call your_schema.sp_reporting_1_price_by_year_month_geo_category ('your_schema', '1.report',',','2022','2','all','milk,steak','priceindex_bar1',@final_sql_string);
+select * from priceindex_bar1;
+select @final_sql_string;
+select * from log_for_reporting;
+Create table `your_schema`.`priceindex_bar1`  
+		Select GEO, Year, Month, Products, Measurement, Price, Status
+		from `your_schema`.`1.report`  WHERE  year in ("2022") and  month in ("02") and (LOCATE("milk", Products)>0 or LOCATE("steak", Products)>0 );
+*/

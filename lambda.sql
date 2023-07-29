@@ -1,14 +1,17 @@
 /*
 ###### Lamba checking #####
-checking#####
+##### This file provides SP for lambda checking#####
 # When lambda checks the status of tables in log table,
 # it needs to execute sql queries,
 # pack these frequently used queries into SP to reduce duplication in coding.
+
+-- call your_schema.sp_lambda_loading_check_status('your_schema','0.PriceIndex',1800,@checking_status);
+-- select @checking_status;
 */
 
 DELIMITER &&  
-DROP PROCEDURE IF EXISTS exampleschema.sp_lambda_loading_check_status;
-CREATE PROCEDURE exampleschema.sp_lambda_loading_check_status (
+DROP PROCEDURE IF EXISTS your_schema.sp_lambda_loading_check_status;
+CREATE PROCEDURE your_schema.sp_lambda_loading_check_status (
 	IN schema_name varchar (50),
 	IN table_name varchar(50),
     In time_interval_in_seconds int,
@@ -23,7 +26,7 @@ BEGIN
 			SET @full_error = CONCAT("ERROR ", @errno, " (", @sqlstate, "): ", @text);
 			SELECT @full_error;
             set result_for_sp_loading_check_status=0;
-            call exampleschema.sp_init_logtable_for_loading (schema_name, '99.lambda checking status before loading', table_name,0, 0,@full_error);
+            call your_schema.sp_init_logtable_for_loading (schema_name, '99.lambda checking status before loading', table_name,0, 0,@full_error);
 				
         END;
 

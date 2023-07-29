@@ -34,7 +34,7 @@
 
 -- 0.2 grant priviledges to users
 -- to grant priviledges as admin
--- GRANT ALL PRIVILEGES ON exampleschema.* TO 'your_username'@'%';
+-- GRANT ALL PRIVILEGES ON your_schema.* TO 'your_username'@'%';
 -- more can be found :https://www.strongdm.com/blog/mysql-create-user-manage-access-privileges-how-to#:~:text=To%20create%20a%20user%20with,their%20privileges%20to%20other%20users.
 -- REMEMBER to always grant the least priviledge for users
 
@@ -46,8 +46,8 @@
 -- a precision of 3 can't be enough to differenciate all log events
 */
 DELIMITER && 
-DROP PROCEDURE IF EXISTS exampleschema.sp_init_logtable_for_loading ;
-CREATE PROCEDURE exampleschema.sp_init_logtable_for_loading (
+DROP PROCEDURE IF EXISTS your_schema.sp_init_logtable_for_loading ;
+CREATE PROCEDURE your_schema.sp_init_logtable_for_loading (
 	IN schema_name varchar(50),
     IN event_source varchar(50),
     IN table_name varchar (50),
@@ -80,11 +80,15 @@ BEGIN
 END &&  
 DELIMITER ;   
 /*
+-- ----------------------------------------------------------
+-- call your_schema.sp_logtable_for_loading ("your_schema");
+-- call your_schema.sp_logtable_for_reporting ("your_schema",);
+-- ----------------------------------------------------------
 -- there will be log table for reporting as well:
 */
 DELIMITER && 
-DROP PROCEDURE IF EXISTS exampleschema.sp_init_logtable_for_reporting ;  
-CREATE PROCEDURE exampleschema.sp_init_logtable_for_reporting (
+DROP PROCEDURE IF EXISTS your_schema.sp_init_logtable_for_reporting ;  
+CREATE PROCEDURE your_schema.sp_init_logtable_for_reporting (
 	IN schema_name varchar(50),
     IN procedure_name varchar(50),
     IN note_s varchar(800)
@@ -114,8 +118,8 @@ DELIMITER ;
 -- 2. to create sp for general table --> Price Index
 	-- to create smaller subcategory tables as well
 DELIMITER && 
-DROP PROCEDURE IF EXISTS exampleschema.sp_init_create_tables_for_loading ;  
-CREATE PROCEDURE exampleschema.sp_init_create_tables_for_loading (
+DROP PROCEDURE IF EXISTS your_schema.sp_init_create_tables_for_loading ;  
+CREATE PROCEDURE your_schema.sp_init_create_tables_for_loading (
 	IN schema_name varchar(50), 
     IN today_date varchar(50)
 )   
@@ -130,6 +134,12 @@ BEGIN
     -- within sql string, + (plus sign) can't be used
     -- instead, we need to use concat to combine and get a complete string
     */
+    set @sql =concat('
+    drop table `',schema_name, '`.`0.PriceIndex` ;');
+    PREPARE dynamic_statement FROM @sql;
+	EXECUTE dynamic_statement;
+	DEALLOCATE PREPARE dynamic_statement;
+    
     set @sql =concat('
     create table IF NOT EXISTS `',schema_name, '`.`0.PriceIndex`  (
 		Date varchar(255),
@@ -246,11 +256,14 @@ BEGIN
 END &&  
 DELIMITER ;   
 /*
+-- ----------------------------------------------------------
+-- call your_schema.sp_create_tables_for_loading ("your_schema","20230528");
+ 
 -- 4. to create parent SP for database init 
 */
 DELIMITER && 
-DROP PROCEDURE IF EXISTS exampleschema.sp_init_database ;  
-CREATE PROCEDURE exampleschema.sp_init_database (
+DROP PROCEDURE IF EXISTS your_schema.sp_init_database ;  
+CREATE PROCEDURE your_schema.sp_init_database (
 	IN schema_name varchar(50), 
     IN today_date varchar(50),
     IN db_event_source varchar(50),
@@ -260,15 +273,16 @@ CREATE PROCEDURE exampleschema.sp_init_database (
     IN note_s varchar(800)
     )    
 BEGIN  
-	call exampleschema.sp_init_logtable_for_loading (schema_name,db_event_source,table_name,db_event_status,total_rows_affected,note_s);
-    call exampleschema.sp_init_logtable_for_reporting (schema_name,db_event_source,note_s);
-	call exampleschema.sp_init_create_tables_for_loading (schema_name,today_date);
-    call exampleschema.sp_init_calendar_month (schema_name);
+	call your_schema.sp_init_logtable_for_loading (schema_name,db_event_source,table_name,db_event_status,total_rows_affected,note_s);
+    call your_schema.sp_init_logtable_for_reporting (schema_name,db_event_source,note_s);
+	call your_schema.sp_init_create_tables_for_loading (schema_name,today_date);
+    call your_schema.sp_init_calendar_month (schema_name);
 
 END &&  
 DELIMITER ;   
 /*
 -- ----------------------------------------------------------
+-- call your_schema.sp_init_database ("your_schema","20230528","testing DB init"," ",1,0,"database init successfully");
 -- THIS ONE SINGLE SQL QUERY WILL GET MYSQL READY TO USE
 
 -- AAA) for testing, we can use below sp to clear all tables and sp created by one owner
@@ -279,8 +293,8 @@ DELIMITER ;
 -- this command will help you find all tables in the db
 */
 DELIMITER && 
-DROP PROCEDURE IF EXISTS exampleschema.sp_init_drop_all_tables ;  
-CREATE PROCEDURE exampleschema.sp_init_drop_all_tables (
+DROP PROCEDURE IF EXISTS your_schema.sp_init_drop_all_tables ;  
+CREATE PROCEDURE your_schema.sp_init_drop_all_tables (
 	IN schema_name varchar(50),
     IN excluding_tables varchar(255) 
     )    
@@ -313,6 +327,7 @@ BEGIN
 END &&  
 DELIMITER ;   
 /*
+-- call your_schema.sp_init_drop_all_tables("your_schema","priceindex")
 
 -- BBB) i found most reports require info month, weekday, date
 -- to create a sp or user defined function for lookup sometimes better than build-in functions
@@ -320,14 +335,14 @@ DELIMITER ;
 -- it will help check if the input is valid month info and find the coresponding month number 
 */
 DELIMITER && 
-DROP PROCEDURE IF EXISTS exampleschema.sp_init_calendar_month ;  
-CREATE PROCEDURE exampleschema.sp_init_calendar_month (
+DROP PROCEDURE IF EXISTS your_schema.sp_init_calendar_month ;  
+CREATE PROCEDURE your_schema.sp_init_calendar_month (
 	IN schema_name varchar(50)
     )    
 BEGIN  
 	/*
 	-- note : 2 digit month number can be achieved by LPAD(MONTHNUMBER,2,0)
-    -- set @schema_name ='exampleschema';
+    -- set @schema_name ='your_schema';
     */
 	set @sql= concat('
 	create table IF NOT EXISTS `', schema_name, '`.`99.month` (
@@ -372,11 +387,15 @@ BEGIN
 END &&  
 DELIMITER ;  
 /*
+-- call your_schema.sp_init_calendar_month ('your_schema');
+
+-- call your_schema.sp_init_calendar_month_checking('your_schema','12',@single_month_string);
+-- select @single_month_string;
 -- below SP is check single_month_string, the result be either 0 or a correct month number
 */
 DELIMITER && 
-DROP PROCEDURE IF EXISTS exampleschema.sp_init_calendar_month_checking;  
-CREATE PROCEDURE exampleschema.sp_init_calendar_month_checking (
+DROP PROCEDURE IF EXISTS your_schema.sp_init_calendar_month_checking;  
+CREATE PROCEDURE your_schema.sp_init_calendar_month_checking (
 	IN schema_name varchar(50),
     IN month_str varchar(50),
     OUT month_num tinyint
@@ -426,3 +445,5 @@ BEGIN
     -- select @month_num;    
 END &&
 DELIMITER ;  
+
+call your_schema.sp_init_database ("your_schema","20230528","testing DB init"," ",1,0,"database init successfully");
